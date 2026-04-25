@@ -161,7 +161,7 @@ def process_emails():
     mail.create(PROCESSED_FOLDER)
     ok, err = 0, 0
     for msg_id in ids:
-        status, msg_data = mail.fetch(msg_id, "(RFC822)")
+        status, msg_data = mail.fetch(msg_id, "(BODY.PEEK[])")
         if status != "OK":
             continue
         msg = email.message_from_bytes(msg_data[0][1])
