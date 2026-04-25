@@ -19,6 +19,38 @@ SUBJECT_FILTER = "заказ с сайта olympickitchen"
 # =====================
 
 
+def normalize(s):
+    return re.sub(r"[\s\-]", "", s).lower()
+
+
+def load_crm_catalog():
+    headers = {"Identifier": CRM_IDENTIFIER, "Application-key": CRM_API_KEY}
+    diets, tariffs = {}, {}
+    try:
+        for item in requests.get(f"{CRM_BASE_URL}/api/public/diets", headers=headers, timeout=15).json().get("items", []):
+            diets[normalize(item["title"])] = item["id"]
+        for item in requests.get(f"{CRM_BASE_URL}/api/public/tariffs", headers=headers, timeout=15).json().get("items", []):
+            tariffs[normalize(item["title"])] = item["id"]
+        print(f"  Диет: {len(diets)}, тарифов: {len(tariffs)}")
+    except Exception as e:
+        print(f"  Не удалось загрузить каталог: {e}")
+    return diets, tariffs
+
+
+def find_id(name, catalog):
+    key = normalize(name)
+    if key in catalog:
+        return catalog[key]
+    # частичное совпадение по словам
+    name_words = set(re.split(r"[\s\-]+", name.lower()))
+    best_id, best_score = None, 0
+    for title, tid in catalog.items():
+        score = sum(1 for w in name_words if w in title)
+        if score > best_score:
+            best_score, best_id = score, tid
+    return best_id if best_score > 0 else None
+
+
 def parse_order_email(body):
     soup = BeautifulSoup(body, "html.parser")
     text = soup.get_text("\n")
@@ -46,11 +78,9 @@ def parse_order_email(body):
     return order
 
 
-def send_to_crm(order):
+def send_to_crm(order, diets, tariffs):
     url = f"{CRM_BASE_URL}/webApi/orderRequests/create"
-    comment_parts = [f"Программа: {order['program']}"] if order["program"] else []
-    if order["duration"]:
-        comment_parts.append(f"Срок: {order['duration']}")
+    comment_parts = []
     if order["no_weekend"]:
         comment_parts.append(f"Без доставки на выходные: {order['no_weekend']}")
     if order["comment"]:
@@ -70,7 +100,20 @@ def send_to_crm(order):
         "price": order["price"],
         "count_person": "1",
     }
-    print(f"    [DEBUG] data['price'] = {data['price']!r}")
+    if order["program"]:
+        diet_id = find_id(order["program"], diets)
+        if diet_id:
+            data["diet_id"] = str(diet_id)
+            print(f"    Диета: {order['program']} -> diet_id={diet_id}")
+        else:
+            print(f"    ! Диета не найдена: {order['program']}")
+    if order["duration"]:
+        tariff_id = find_id(order["duration"], tariffs)
+        if tariff_id:
+            data["tariff_id"] = str(tariff_id)
+            print(f"    Тариф: {order['duration']} -> tariff_id={tariff_id}")
+        else:
+            print(f"    ! Тариф не найден: {order['duration']}")
     resp = requests.post(url, data=data, timeout=30)
     resp.raise_for_status()
     return resp.json()
@@ -103,6 +146,7 @@ def decode_subject(msg):
 
 def process_emails():
     print(f"\n[{datetime.now():%Y-%m-%d %H:%M:%S}] Проверка olympic почты...")
+    diets, tariffs = load_crm_catalog()
     mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
     mail.login(EMAIL_LOGIN, EMAIL_PASSWORD)
     mail.select("INBOX")
@@ -135,7 +179,7 @@ def process_emails():
         print(f"    Клиент: {order['name']}, тел: {order['phone']}")
         print(f"    Адрес: {order['address']}, программа: {order['program']}, сумма: {order['price']} руб.")
         try:
-            result = send_to_crm(order)
+            result = send_to_crm(order, diets, tariffs)
             crm_id = result.get("request", {}).get("id", "?")
             print(f"    Заявка создана в CRM, ID: {crm_id}")
             mail.store(msg_id, "+FLAGS", "\\Seen")
