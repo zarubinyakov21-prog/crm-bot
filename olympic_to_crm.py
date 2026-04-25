@@ -84,7 +84,7 @@ def send_to_crm(order, diets, tariffs):
     if order["no_weekend"]:
         comment_parts.append(f"Без доставки на выходные: {order['no_weekend']}")
     if order["comment"]:
-        comment_parts.append(f"Комментарий: {order['comment']}")
+        comment_parts.append(order["comment"])
     comment_parts.append("Источник: сайт olympickitchen.ru")
     data = {
         "identifier": CRM_IDENTIFIER,
