@@ -18,8 +18,14 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run script
+      - name: Run pp-obed orders
         env:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           CRM_API_KEY: ${{ secrets.CRM_API_KEY }}
         run: python email_to_crm.py
+
+      - name: Run olympic orders
+        env:
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          CRM_API_KEY: ${{ secrets.CRM_API_KEY }}
+        run: python olympic_to_crm.py
