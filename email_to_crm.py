@@ -32,9 +32,10 @@ _DELIVERY_TIMES = {
 }
 CRM_ORDER_SOURCE_ID = "1"
 PROCESSED_IDS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "email_processed_ids.json")
+ADDRESS_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "address_cache.json")
 ERROR_LOG = os.path.expanduser("~/crm_bot/error.log")
 SOCKET_TIMEOUT = 60
-ADDR_MATCH_THRESHOLD = 0.4  # порог Jaccard для совпадения адресов
+ADDR_MATCH_THRESHOLD = 0.4
 # =====================
 
 logging.basicConfig(
@@ -99,25 +100,17 @@ def find_delivery_time_id(interval_str, delivery_times):
     return CRM_DELIVERY_TIME_ID
 
 
-def find_client_by_phone(phone):
-    digits = re.sub(r"\D", "", phone)
-    if not digits:
-        return None
+def load_address_cache():
     try:
-        resp = requests.get(
-            f"{CRM_BASE_URL}/api/public/clients",
-            headers=_CRM_HEADERS,
-            params={"phone": digits},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        items = data.get("items") if isinstance(data, dict) else (data if isinstance(data, list) else [])
-        if items:
-            return items[0]
-    except Exception as e:
-        logger.warning(f"Поиск клиента по телефону {phone!r} не удался: {e}")
-    return None
+        with open(ADDRESS_CACHE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_address_cache(cache):
+    with open(ADDRESS_CACHE_FILE, "w") as f:
+        json.dump(cache, f, ensure_ascii=False)
 
 
 def _addr_tokens(addr):
@@ -126,29 +119,38 @@ def _addr_tokens(addr):
     return {w for w in addr.split() if w not in _ADDR_STOP and len(w) > 1}
 
 
+def _tokens_match(a, b):
+    """Точное совпадение или одно является префиксом другого (мин. 4 символа)."""
+    if a == b:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 4 and long.startswith(short)
+
+
 def match_address(email_addr, client_addresses):
-    """Возвращает address_id при нечётком совпадении (Jaccard >= ADDR_MATCH_THRESHOLD), иначе None."""
+    """Нечёткое совпадение с поддержкой префиксов ('павш' → 'павшинский')."""
     email_tokens = _addr_tokens(email_addr)
     if not email_tokens:
         return None
     best_id, best_score = None, 0.0
     for addr_obj in client_addresses:
-        addr_text = (
-            addr_obj.get("address") or addr_obj.get("text") or addr_obj.get("title") or ""
-        )
+        addr_text = addr_obj.get("address") or addr_obj.get("text") or addr_obj.get("title") or ""
         addr_id = addr_obj.get("id")
         if not addr_text or not addr_id:
             continue
         crm_tokens = _addr_tokens(addr_text)
         if not crm_tokens:
             continue
-        score = len(email_tokens & crm_tokens) / len(email_tokens | crm_tokens)
+        matched = sum(
+            1 for et in email_tokens if any(_tokens_match(et, ct) for ct in crm_tokens)
+        )
+        score = matched / len(email_tokens | crm_tokens)
         if score > best_score:
             best_score, best_id = score, addr_id
     if best_score >= ADDR_MATCH_THRESHOLD:
         logger.info(f"Адрес найден (score={best_score:.2f}): {email_addr!r} -> address_id={best_id}")
         return best_id
-    logger.info(f"Адрес не совпал (max_score={best_score:.2f}): {email_addr!r} — создаю новый")
+    logger.info(f"Адрес не совпал (max_score={best_score:.2f}): {email_addr!r}")
     return None
 
 
@@ -246,11 +248,14 @@ def parse_order_email(html_body):
     return order
 
 
-def send_to_crm(order, crm_dishes, delivery_times):
+def send_to_crm(order, crm_dishes, delivery_times, address_cache):
     delivery_time_id = find_delivery_time_id(order["delivery_interval"], delivery_times)
 
-    address_id = None
-    if order["phone"] and order["address"]:
+    phone_digits = re.sub(r"\D", "", order["phone"])
+    address_id = address_cache.get(phone_digits)
+    if address_id:
+        logger.info(f"Адрес из кэша: phone={phone_digits} -> address_id={address_id}")
+    elif order["phone"] and order["address"]:
         client = find_client_by_phone(order["phone"])
         if client:
             addresses = client.get("addresses") or []
@@ -293,7 +298,14 @@ def send_to_crm(order, crm_dishes, delivery_times):
     logger.info(f"    [DEBUG] data['price'] = {data['price']!r}")
     resp = requests.post(url, data=data, timeout=30)
     resp.raise_for_status()
-    return resp.json()
+    result = resp.json()
+    # кэшируем address_id чтобы следующий заказ от этого клиента не создавал дубль адреса
+    cached_addr_id = result.get("request", {}).get("user_address_id")
+    if phone_digits and cached_addr_id:
+        address_cache[phone_digits] = cached_addr_id
+        save_address_cache(address_cache)
+        logger.info(f"Адрес закэширован: phone={phone_digits} -> address_id={cached_addr_id}")
+    return result
 
 
 def get_email_body(msg):
@@ -335,6 +347,7 @@ def process_emails():
     logger.info("Проверка почты...")
     crm_dishes = load_crm_dishes()
     delivery_times = load_delivery_times()
+    address_cache = load_address_cache()
     _months_en = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     # ищем за последние 2 дня: IMAP-сервер Яндекса работает по UTC,
@@ -388,7 +401,7 @@ def process_emails():
                             continue
                         logger.info(f"Клиент: {order['name']}, тел: {order['phone']}")
                         logger.info(f"Адрес: {order['address']}, сумма: {order['total_price']} руб.")
-                        result = send_to_crm(order, crm_dishes, delivery_times)
+                        result = send_to_crm(order, crm_dishes, delivery_times, address_cache)
                         crm_id = result.get("request", {}).get("id", "?")
                         logger.info(f"Заявка создана в CRM, ID: {crm_id}")
                         save_processed_id(msg_key, processed_ids)
