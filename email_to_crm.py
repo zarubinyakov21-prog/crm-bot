@@ -153,17 +153,23 @@ def match_address(email_addr, client_addresses):
 
 
 def adjust_dish_prices(dishes, total_price_str):
-    """Последнее блюдо: price=total, count=1. Остальные: price=0.
-    count=1 гарантирует что CRM не перемножит сумму на количество порций."""
+    """Распределяет цены пропорционально: base_per_unit для всех, последнее блюдо
+    получает остаток. Гарантирует sum(price×count) == total при делимых суммах."""
     total = int(total_price_str or "0")
     real = [d for d in dishes if d["title"] != ""]
-    if not real:
-        return dishes
-    last = len(real) - 1
-    return [
-        {**dish, "price": total, "count": 1} if i == last else {**dish, "price": 0}
-        for i, dish in enumerate(real)
-    ]
+    if not real or total == 0:
+        return real or dishes
+    total_units = sum(d["count"] for d in real)
+    base = total // total_units
+    adjusted, assigned = [], 0
+    for i, dish in enumerate(real):
+        if i == len(real) - 1:
+            unit_price = (total - assigned) // dish["count"]
+        else:
+            unit_price = base
+        adjusted.append({**dish, "price": unit_price})
+        assigned += unit_price * dish["count"]
+    return adjusted
 
 
 def find_dish(dish_name, crm_dishes):
