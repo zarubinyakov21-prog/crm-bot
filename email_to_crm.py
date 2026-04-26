@@ -152,6 +152,31 @@ def match_address(email_addr, client_addresses):
     return None
 
 
+def adjust_dish_prices(dishes, total_price_str):
+    """Пропорционально корректирует цены блюд, чтобы сумма(price*count) == total_price."""
+    total = int(total_price_str or "0")
+    if not dishes or total == 0:
+        return dishes
+    parsed_sum = sum(d["price"] * d["count"] for d in dishes)
+    if parsed_sum == total:
+        return dishes
+    logger.info(f"Корректирую цены блюд: {parsed_sum} → {total} руб.")
+    total_units = sum(d["count"] for d in dishes)
+    adjusted = []
+    assigned = 0
+    for i, dish in enumerate(dishes):
+        if i == len(dishes) - 1:
+            # последнему блюду отдаём остаток, чтобы сумма была точной
+            unit_price = max(0, (total - assigned) // dish["count"])
+        elif parsed_sum > 0:
+            unit_price = round(dish["price"] * total / parsed_sum)
+        else:
+            unit_price = round(total / total_units)
+        adjusted.append({**dish, "price": unit_price})
+        assigned += unit_price * dish["count"]
+    return adjusted
+
+
 def find_dish(dish_name, crm_dishes):
     name_lower = dish_name.strip().lower()
     if name_lower in crm_dishes:
@@ -255,7 +280,8 @@ def send_to_crm(order, crm_dishes, delivery_times):
     else:
         data["address_text"] = order["address"]
 
-    for i, dish in enumerate(order["dishes"]):
+    dishes = adjust_dish_prices(order["dishes"], order["total_price"])
+    for i, dish in enumerate(dishes):
         crm_dish = find_dish(dish["title"], crm_dishes)
         if crm_dish:
             data[f"retail_order_dishes[{i}][dish_id]"] = str(crm_dish["id"])
