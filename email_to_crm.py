@@ -1,7 +1,7 @@
 import imaplib, email, re, requests, os, json, logging, socket, sys, ssl
 from email.header import decode_header
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -326,8 +326,10 @@ def process_emails():
     delivery_times = load_delivery_times()
     _months_en = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    now = datetime.now()
-    today = f"{now.day:02d}-{_months_en[now.month - 1]}-{now.year}"
+    # ищем за последние 2 дня: IMAP-сервер Яндекса работает по UTC,
+    # письма после полуночи МСК числятся вчерашним днём по UTC
+    since_dt = datetime.now() - timedelta(days=1)
+    since = f"{since_dt.day:02d}-{_months_en[since_dt.month - 1]}-{since_dt.year}"
     processed_ids = load_processed_ids()
     ok, err = 0, 0
 
@@ -345,7 +347,7 @@ def process_emails():
                     logger.warning(f"Папка {folder!r} недоступна, пропускаю.")
                     continue
 
-                status, ids = mail.search(None, f'SINCE "{today}"')
+                status, ids = mail.search(None, f'SINCE "{since}"')
                 if status != "OK" or not ids[0]:
                     logger.info(f"[{folder}] Новых писем нет.")
                     continue
