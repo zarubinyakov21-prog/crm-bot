@@ -1,0 +1,16 @@
+[Unit]
+Description=CRM Bot — email и olympic orders
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=yakov
+WorkingDirectory=/home/yakov/crm_bot
+ExecStart=/home/yakov/crm_bot/venv/bin/python3 /home/yakov/crm_bot/email_to_crm.py
+ExecStart=/home/yakov/crm_bot/venv/bin/python3 /home/yakov/crm_bot/olympic_to_crm.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

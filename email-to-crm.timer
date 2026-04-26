@@ -1,0 +1,10 @@
+[Unit]
+Description=Запускать CRM Bot каждые 5 минут
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
