@@ -206,11 +206,9 @@ def parse_order_email(html_body):
             if len(cells) < 3:
                 continue
             lines = [l.strip() for l in cells[0].get_text("\n", strip=True).split("\n") if l.strip()]
-            if not lines:
+            if lines and lines[0] in ("Название",):
                 continue
-            if lines[0] == "Название":
-                continue
-            if lines[0].startswith("Данные о заказе"):
+            if lines and lines[0].startswith("Данные о заказе"):
                 continue
             try:
                 qty = int(cells[1].get_text(strip=True))
@@ -220,6 +218,10 @@ def parse_order_email(html_body):
                 price = int(re.sub(r"[^\d]", "", cells[2].get_text(strip=True))) if len(cells) > 2 else 0
             except Exception:
                 price = 0
+            if not lines:
+                # пустая строка в таблице — слот для суммы заказа
+                order["dishes"].append({"title": "", "count": qty, "price": price})
+                continue
             sub_dishes = []
             for line in lines[1:]:
                 for prefix in ["Суп:", "Второе блюдо:", "Салат:", "Напиток:", "Закуска:", "Десерт:", "Фрэш:"]:
@@ -228,9 +230,10 @@ def parse_order_email(html_body):
                         if name:
                             sub_dishes.append(name)
             if sub_dishes:
-                sub_price = price // len(sub_dishes) if sub_dishes else 0
                 for dish_name in sub_dishes:
-                    order["dishes"].append({"title": dish_name, "count": qty, "price": sub_price})
+                    order["dishes"].append({"title": dish_name, "count": qty, "price": 0})
+                # пустой слот count=1 — на него ляжет общая сумма заказа
+                order["dishes"].append({"title": "", "count": 1, "price": 0})
             else:
                 order["dishes"].append({"title": lines[0], "count": qty, "price": price})
     return order
