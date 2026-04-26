@@ -153,13 +153,16 @@ def match_address(email_addr, client_addresses):
 
 
 def adjust_dish_prices(dishes, total_price_str):
-    """Последнее блюдо = стоимость заказа, остальные = 0."""
-    if not dishes:
+    """Последнее блюдо: price=total, count=1. Остальные: price=0.
+    count=1 гарантирует что CRM не перемножит сумму на количество порций."""
+    total = int(total_price_str or "0")
+    real = [d for d in dishes if d["title"] != ""]
+    if not real:
         return dishes
-    last = len(dishes) - 1
+    last = len(real) - 1
     return [
-        {**dish, "price": int(total_price_str or "0") if i == last else 0}
-        for i, dish in enumerate(dishes)
+        {**dish, "price": total, "count": 1} if i == last else {**dish, "price": 0}
+        for i, dish in enumerate(real)
     ]
 
 
@@ -232,8 +235,6 @@ def parse_order_email(html_body):
             if sub_dishes:
                 for dish_name in sub_dishes:
                     order["dishes"].append({"title": dish_name, "count": qty, "price": 0})
-                # пустой слот count=1 — на него ляжет общая сумма заказа
-                order["dishes"].append({"title": "", "count": 1, "price": 0})
             else:
                 order["dishes"].append({"title": lines[0], "count": qty, "price": price})
     return order
