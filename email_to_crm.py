@@ -1,4 +1,4 @@
-import imaplib, email, re, requests, os, json, logging, socket, sys
+import imaplib, email, re, requests, os, json, logging, socket, sys, ssl
 from email.header import decode_header
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -333,7 +333,9 @@ def process_emails():
 
     mail = None
     try:
-        mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
+        mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, ssl_context=ssl_ctx)
         mail.login(EMAIL_LOGIN, EMAIL_PASSWORD)
 
         for folder in ["INBOX", "Spam"]:
