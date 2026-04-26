@@ -153,11 +153,12 @@ def match_address(email_addr, client_addresses):
 
 
 def adjust_dish_prices(dishes, total_price_str):
-    """Первое блюдо = стоимость заказа, остальные = 0."""
+    """Последнее блюдо = стоимость заказа, остальные = 0."""
     if not dishes:
         return dishes
+    last = len(dishes) - 1
     return [
-        {**dish, "price": int(total_price_str or "0") if i == 0 else 0}
+        {**dish, "price": int(total_price_str or "0") if i == last else 0}
         for i, dish in enumerate(dishes)
     ]
 
